@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -28,7 +29,13 @@ public class Account {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
-    protected Account() {}
+    @Version
+    @Column(nullable = false)
+    private long version;
+
+    protected Account() {
+        // JPA
+    }
 
     public Account(String id, String externalReference, String currency, long initialBalance) {
         this.id = id;
@@ -48,8 +55,8 @@ public class Account {
     public long getBalance() { return balance; }
     public void setBalance(long balance) { this.balance = balance; }
     public Instant getCreatedAt() { return createdAt; }
+    public long getVersion() { return version; }
 
-    // Identity-based
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

@@ -15,5 +15,7 @@ public record TransferRequest(
     TransactionType type,
 
     @NotBlank(message = "description is required")
-    String description
+    String description,
+
+    String idempotencyKey
 ) {}

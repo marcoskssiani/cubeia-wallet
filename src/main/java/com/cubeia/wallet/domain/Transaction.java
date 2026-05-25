@@ -13,17 +13,19 @@ import java.util.Objects;
 
 /**
  * Immutable ledger entry.
- * Design notes:
- * - amount is signed internally: positive = credit, negative = debit.
- * - preBalance / postBalance form the audit trail: at any moment,
- *   postBalance of transaction N must equal preBalance of transaction N+1.
  *
+ * - amount is signed internally: positive = credit, negative = debit.
+ * - preBalance / postBalance form the audit trail.
+ * - idempotencyKey has a UNIQUE constraint; inserting the same key twice
+ *   throws DataIntegrityViolationException, which the service converts into
+ *   a typed DuplicateIdempotencyKeyException and recovers from gracefully.
  */
 @Entity
 @Table(
     name = "transactions",
     indexes = {
-        @Index(name = "idx_transactions_account_id", columnList = "accountId")
+        @Index(name = "idx_transactions_account_id", columnList = "accountId"),
+        @Index(name = "idx_transactions_idempotency_key", columnList = "idempotencyKey", unique = true)
     }
 )
 public class Transaction {
@@ -54,12 +56,16 @@ public class Transaction {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(updatable = false, unique = true)
+    private String idempotencyKey;
+
     protected Transaction() {
         // JPA
     }
 
     public Transaction(String id, String accountId, long amount, long preBalance,
-                       long postBalance, TransactionType type, String description) {
+                       long postBalance, TransactionType type, String description,
+                       String idempotencyKey) {
         this.id = id;
         this.accountId = accountId;
         this.amount = amount;
@@ -67,6 +73,7 @@ public class Transaction {
         this.postBalance = postBalance;
         this.type = type;
         this.description = description;
+        this.idempotencyKey = idempotencyKey;
     }
 
     @PrePersist
@@ -82,6 +89,7 @@ public class Transaction {
     public TransactionType getType() { return type; }
     public String getDescription() { return description; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getIdempotencyKey() { return idempotencyKey; }
 
     @Override
     public boolean equals(Object o) {

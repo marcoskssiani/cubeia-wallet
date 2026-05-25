@@ -12,5 +12,6 @@ public record TransactionResponse(
     long postBalance,
     TransactionType type,
     String description,
-    Instant createdAt
+    Instant createdAt,
+    String idempotencyKey
 ) {}

@@ -1,6 +1,6 @@
 # Cubeia Wallet
 
-REST bookkeeping service. All four spec endpoints work — single-threaded.
+REST bookkeeping service. **Thread-safe and cluster-ready.**
 
 ## Requirements
 
@@ -33,18 +33,38 @@ POST /api/v1/accounts/{id}/transfers
 {
   "amount": 1000,
   "type": "CREDIT",
-  "description": "Deposit"
+  "description": "Deposit",
+  "idempotencyKey": "optional-uuid-for-safe-retries"
 }
 ```
 
 `type` is `CREDIT` (funds in) or `DEBIT` (funds out). `amount` is always
-positive. Transfers inherit the account's currency — no `currency` field on
-the request.
+positive. Transfers inherit the account's currency.
+
+`idempotencyKey` is optional but recommended for clients that may retry on
+network timeouts. Sending the same key twice returns the original transaction
+without creating a duplicate.
 
 Insufficient funds returns `422 INSUFFICIENT_FUNDS` with `currentBalance` and
-`requestedDebit` in `details`.
+`requestedDebit` in the `details` map.
 
-### curl
+## Concurrency model
+
+This service is designed to run as a cluster of nodes against a shared
+database. The correctness story:
+
+- `Account` has a `@Version` field — JPA appends `WHERE version = ?` to every
+  UPDATE.
+- On version conflict, `ObjectOptimisticLockingFailureException` is thrown
+  and `WalletService.transfer()` retries the operation up to 5 times with a
+  50ms wait.
+- The retry loop lives in a separate bean from `@Transactional executeTransfer`
+  so Spring's AOP proxy starts a fresh database transaction on every attempt.
+- `idempotencyKey` is enforced by a UNIQUE database index; concurrent same-key
+  requests are gracefully de-duplicated.
+
+
+## curl
 
 ```bash
 BASE=http://localhost:8080/api/v1

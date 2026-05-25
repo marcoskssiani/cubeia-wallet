@@ -2,7 +2,6 @@ package com.cubeia.wallet.service;
 
 import com.cubeia.wallet.domain.Account;
 import com.cubeia.wallet.domain.Transaction;
-import com.cubeia.wallet.domain.TransactionType;
 import com.cubeia.wallet.dto.AccountResponse;
 import com.cubeia.wallet.dto.BalanceResponse;
 import com.cubeia.wallet.dto.CreateAccountRequest;
@@ -11,11 +10,13 @@ import com.cubeia.wallet.dto.TransactionResponse;
 import com.cubeia.wallet.dto.TransferRequest;
 import com.cubeia.wallet.exception.AccountNotFoundException;
 import com.cubeia.wallet.exception.DuplicateAccountException;
-import com.cubeia.wallet.exception.InsufficientFundsException;
+import com.cubeia.wallet.exception.DuplicateIdempotencyKeyException;
+import com.cubeia.wallet.exception.WalletException;
 import com.cubeia.wallet.repository.AccountRepository;
 import com.cubeia.wallet.repository.TransactionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,13 +26,22 @@ import java.util.UUID;
 @Service
 public class WalletService {
 
+    // 10 retries gives enough headroom for ~20 concurrent contenders on the
+    // same account to all serialize within the retry budget. A smaller value
+    // (e.g. 5) makes legitimate burst load look like contention failure.
+    static final int MAX_RETRIES = 10;
+    static final long RETRY_WAIT_MS = 50;
+
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final WalletTransferService transferService;
 
     public WalletService(AccountRepository accountRepository,
-                         TransactionRepository transactionRepository) {
+                         TransactionRepository transactionRepository,
+                         WalletTransferService transferService) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.transferService = transferService;
     }
 
     @Transactional
@@ -69,39 +79,6 @@ public class WalletService {
             .toList();
     }
 
-    @Transactional
-    public TransactionResponse transfer(String accountId, TransferRequest request) {
-        Account account = accountRepository.findById(accountId)
-            .orElseThrow(() -> new AccountNotFoundException(accountId));
-
-        long signedAmount = request.type() == TransactionType.CREDIT
-            ? request.amount()
-            : -request.amount();
-
-        long preBalance = account.getBalance();
-        long postBalance = preBalance + signedAmount;
-
-        if (postBalance < 0) {
-            throw new InsufficientFundsException(preBalance, request.amount());
-        }
-
-        account.setBalance(postBalance);
-        accountRepository.save(account);
-
-        Transaction tx = new Transaction(
-            UUID.randomUUID().toString(),
-            accountId,
-            signedAmount,
-            preBalance,
-            postBalance,
-            request.type(),
-            request.description()
-        );
-        transactionRepository.save(tx);
-
-        return toTransactionResponse(tx);
-    }
-
     @Transactional(readOnly = true)
     public TransactionListResponse listTransactions(String accountId, int page, int size) {
         if (!accountRepository.existsById(accountId)) {
@@ -115,6 +92,31 @@ public class WalletService {
             .toList();
 
         return new TransactionListResponse(accountId, responses, txPage.getTotalElements(), page, size);
+    }
+
+    public TransactionResponse transfer(String accountId, TransferRequest request) {
+        ObjectOptimisticLockingFailureException lastOptimisticException = null;
+
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                return transferService.executeTransfer(accountId, request);
+
+            } catch (ObjectOptimisticLockingFailureException e) {
+                lastOptimisticException = e;
+                sleepSilently(RETRY_WAIT_MS);
+
+            } catch (DuplicateIdempotencyKeyException e) {
+                return transferService.findByIdempotencyKey(e.getIdempotencyKey())
+                    .orElseThrow(() -> new WalletException(
+                        "Idempotency key conflict but no transaction found — this should not happen", e));
+            }
+        }
+
+        throw new WalletException(
+            "Transfer failed after " + MAX_RETRIES + " attempts due to concurrent modification. " +
+            "This is extremely rare; the caller may retry.",
+            lastOptimisticException
+        );
     }
 
     private AccountResponse toAccountResponse(Account account) {
@@ -136,7 +138,16 @@ public class WalletService {
             tx.getPostBalance(),
             tx.getType(),
             tx.getDescription(),
-            tx.getCreatedAt()
+            tx.getCreatedAt(),
+            tx.getIdempotencyKey()
         );
+    }
+
+    private void sleepSilently(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
