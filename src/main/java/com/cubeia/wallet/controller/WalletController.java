@@ -46,6 +46,11 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @GetMapping("/stats")
+    public ResponseEntity<StatsResponse> getStats() {
+        return ResponseEntity.ok(walletService.getStats());
+    }
+
     @GetMapping("/{accountId}")
     public ResponseEntity<AccountResponse> getAccount(@PathVariable String accountId) {
         return ResponseEntity.ok(walletService.getAccount(accountId));
