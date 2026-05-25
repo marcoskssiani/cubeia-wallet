@@ -1,0 +1,470 @@
+{
+  "info": {
+    "_postman_id": "b7e3d2a1-4c9f-4a6e-9c21-0f1d8e5a7b30",
+    "name": "Cubeia Wallet API",
+    "description": "Manual-test collection for the Cubeia Wallet service.\n\n**Base URL:** `{{baseUrl}}` (defaults to http://localhost:8080)\n\n**Money is in minor units** (e.g. cents). `500` EUR means 5.00 EUR.\n\n**Suggested flow:**\n1. `Health` → confirm the app is up.\n2. `Accounts / Create account` → stores the new id in `{{accountId}}` automatically.\n3. `Transfers / Credit` then `Transfers / Debit` against `{{accountId}}`.\n4. `Accounts / Get balance` and `Transfers / List transactions` to verify.\n\nThe \"Negative cases\" folder exercises validation, not-found, conflict and insufficient-funds errors.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Liveness probe. Returns `{ \"status\": \"ok\" }`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounts",
+      "item": [
+        {
+          "name": "List accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts"]
+            },
+            "description": "Returns all accounts, newest first."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('body is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"customer-{{$timestamp}}\",\n  \"currency\": \"EUR\",\n  \"initialBalance\": 10000\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts"]
+            },
+            "description": "Creates an account. `externalReference` must be unique (a timestamp is appended here to keep reruns unique). `currency` is a 3-letter ISO 4217 code. `initialBalance` is optional and defaults to 0; it is in minor units.\n\nOn success (201) the new account id is saved to the `{{accountId}}` collection variable for the requests that follow."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('has id', () => pm.expect(body.id).to.be.a('string'));",
+                  "pm.collectionVariables.set('accountId', body.id);",
+                  "console.log('Saved accountId =', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}"]
+            },
+            "description": "Fetches a single account by id. Uses the `{{accountId}}` saved by Create account."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('id matches', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('accountId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/balance",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "balance"]
+            },
+            "description": "Returns `{ accountId, currency, balance }`. Balance is in minor units."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has numeric balance', () => pm.expect(pm.response.json().balance).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Transfers",
+      "item": [
+        {
+          "name": "Credit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"type\": \"CREDIT\",\n  \"description\": \"Deposit\",\n  \"idempotencyKey\": \"{{$guid}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transfers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "transfers"]
+            },
+            "description": "Adds funds to the account. `amount` is a positive integer in minor units. `type` is `CREDIT` or `DEBIT`. `description` is required. `idempotencyKey` is optional — replaying the same key returns the original transaction instead of creating a new one.\n\nResponse includes `preBalance` and `postBalance`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('type is CREDIT', () => pm.expect(body.type).to.eql('CREDIT'));",
+                  "pm.test('postBalance > preBalance', () => pm.expect(body.postBalance).to.be.above(body.preBalance));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Debit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1500,\n  \"type\": \"DEBIT\",\n  \"description\": \"Coffee shop\",\n  \"idempotencyKey\": \"{{$guid}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transfers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "transfers"]
+            },
+            "description": "Removes funds from the account. Fails with 422 INSUFFICIENT_FUNDS if the balance is too low (see Negative cases)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('type is DEBIT', () => pm.expect(body.type).to.eql('DEBIT'));",
+                  "pm.test('postBalance < preBalance', () => pm.expect(body.postBalance).to.be.below(body.preBalance));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transactions?page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "transactions"],
+              "query": [
+                { "key": "page", "value": "0", "description": "0-based page index (>= 0)" },
+                { "key": "size", "value": "20", "description": "page size (1-100)" }
+              ]
+            },
+            "description": "Paginated transaction history, newest first."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has transactions array', () => pm.expect(pm.response.json().transactions).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Events (SSE)",
+      "item": [
+        {
+          "name": "Active connections",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events/connections",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "events", "connections"]
+            },
+            "description": "Returns `{ \"activeConnections\": <n> }` — the number of open SSE streams."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subscribe (activity stream)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "events"]
+            },
+            "description": "Server-Sent Events stream of transaction activity. This is a long-lived streaming endpoint; Postman will keep the connection open and show events as they arrive. Trigger a transfer in another tab to see events. Cancel the request to disconnect.\n\nNote: the standard Postman runner doesn't follow SSE streams well — open this in the browser or use `curl -N {{baseUrl}}/api/v1/events`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Negative cases",
+      "item": [
+        {
+          "name": "Create account - validation error (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"\",\n  \"currency\": \"eur\",\n  \"initialBalance\": -5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts"]
+            },
+            "description": "Blank reference, lowercase currency, and a negative balance all fail bean validation → 400 VALIDATION_ERROR."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code VALIDATION_ERROR', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create account - duplicate (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalReference\": \"dup-fixed-reference\",\n  \"currency\": \"EUR\",\n  \"initialBalance\": 0\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts"]
+            },
+            "description": "Send this twice with the same fixed `externalReference`. The first call returns 201; the second returns 409 DUPLICATE_ACCOUNT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 (first run) or 409 (subsequent)', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get account - not found (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/does-not-exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "does-not-exist"]
+            },
+            "description": "Unknown id → 404 ACCOUNT_NOT_FOUND."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error code ACCOUNT_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('ACCOUNT_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Debit - insufficient funds (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 99999999,\n  \"type\": \"DEBIT\",\n  \"description\": \"Overdraft attempt\",\n  \"idempotencyKey\": \"{{$guid}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transfers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "transfers"]
+            },
+            "description": "Debiting more than the balance → 422 INSUFFICIENT_FUNDS with `details.currentBalance` and `details.requestedDebit`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('error code INSUFFICIENT_FUNDS', () => pm.expect(pm.response.json().code).to.eql('INSUFFICIENT_FUNDS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Transfer - invalid amount (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 0,\n  \"type\": \"CREDIT\",\n  \"description\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transfers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "accounts", "{{accountId}}", "transfers"]
+            },
+            "description": "`amount` must be positive and `description` must not be blank → 400 VALIDATION_ERROR."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code VALIDATION_ERROR', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "accountId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

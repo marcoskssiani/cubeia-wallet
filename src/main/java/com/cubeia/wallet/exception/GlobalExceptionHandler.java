@@ -1,6 +1,7 @@
 package com.cubeia.wallet.exception;
 
 import com.cubeia.wallet.dto.ErrorResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -72,9 +73,19 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handle(Exception ex) {
+    public ResponseEntity<ErrorResponse> handle(Exception ex, HttpServletResponse response) {
+        if (response.isCommitted() || isSseResponse(response)) {
+            log.debug("Ignoring error on committed/SSE response (client likely disconnected): {}",
+                ex.getMessage());
+            return null;
+        }
         log.error("Unhandled exception", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ErrorResponse.of("INTERNAL_ERROR", "An unexpected error occurred"));
+    }
+
+    private static boolean isSseResponse(HttpServletResponse response) {
+        String ct = response.getContentType();
+        return ct != null && ct.contains("text/event-stream");
     }
 }

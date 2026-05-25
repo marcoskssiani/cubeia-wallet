@@ -5,15 +5,18 @@ import com.cubeia.wallet.domain.Transaction;
 import com.cubeia.wallet.domain.TransactionType;
 import com.cubeia.wallet.dto.TransactionResponse;
 import com.cubeia.wallet.dto.TransferRequest;
+import com.cubeia.wallet.event.TransactionCreatedEvent;
 import com.cubeia.wallet.exception.AccountNotFoundException;
 import com.cubeia.wallet.exception.DuplicateIdempotencyKeyException;
 import com.cubeia.wallet.exception.InsufficientFundsException;
 import com.cubeia.wallet.repository.AccountRepository;
 import com.cubeia.wallet.repository.TransactionRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,11 +25,14 @@ public class WalletTransferService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public WalletTransferService(AccountRepository accountRepository,
-                                  TransactionRepository transactionRepository) {
+                                  TransactionRepository transactionRepository,
+                                  ApplicationEventPublisher eventPublisher) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -75,6 +81,18 @@ public class WalletTransferService {
             }
             throw e;
         }
+
+        eventPublisher.publishEvent(new TransactionCreatedEvent(
+            tx.getId(),
+            accountId,
+            account.getExternalReference(),
+            account.getCurrency(),
+            signedAmount,
+            request.type(),
+            request.description(),
+            postBalance,
+            tx.getCreatedAt() != null ? tx.getCreatedAt() : Instant.now()
+        ));
 
         return toResponse(tx);
     }

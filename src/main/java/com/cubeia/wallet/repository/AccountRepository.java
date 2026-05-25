@@ -2,6 +2,7 @@ package com.cubeia.wallet.repository;
 
 import com.cubeia.wallet.domain.Account;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,4 +14,7 @@ public interface AccountRepository extends JpaRepository<Account, String> {
     Optional<Account> findByExternalReference(String externalReference);
 
     List<Account> findAllByOrderByCreatedAtDesc();
+
+    @Query("SELECT COALESCE(SUM(a.balance), 0) FROM Account a")
+    Long sumAllBalances();
 }

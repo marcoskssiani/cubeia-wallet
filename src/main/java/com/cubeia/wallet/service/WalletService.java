@@ -5,6 +5,7 @@ import com.cubeia.wallet.domain.Transaction;
 import com.cubeia.wallet.dto.AccountResponse;
 import com.cubeia.wallet.dto.BalanceResponse;
 import com.cubeia.wallet.dto.CreateAccountRequest;
+import com.cubeia.wallet.dto.StatsResponse;
 import com.cubeia.wallet.dto.TransactionListResponse;
 import com.cubeia.wallet.dto.TransactionResponse;
 import com.cubeia.wallet.dto.TransferRequest;
@@ -14,34 +15,36 @@ import com.cubeia.wallet.exception.DuplicateIdempotencyKeyException;
 import com.cubeia.wallet.exception.WalletException;
 import com.cubeia.wallet.repository.AccountRepository;
 import com.cubeia.wallet.repository.TransactionRepository;
+import com.cubeia.wallet.sse.ActivityFeedService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 @Service
 public class WalletService {
 
-    // 10 retries gives enough headroom for ~20 concurrent contenders on the
-    // same account to all serialize within the retry budget. A smaller value
-    // (e.g. 5) makes legitimate burst load look like contention failure.
     static final int MAX_RETRIES = 10;
     static final long RETRY_WAIT_MS = 50;
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final WalletTransferService transferService;
+    private final ActivityFeedService activityFeedService;
 
     public WalletService(AccountRepository accountRepository,
                          TransactionRepository transactionRepository,
-                         WalletTransferService transferService) {
+                         WalletTransferService transferService,
+                         ActivityFeedService activityFeedService) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.transferService = transferService;
+        this.activityFeedService = activityFeedService;
     }
 
     @Transactional
@@ -77,6 +80,15 @@ public class WalletService {
         return accountRepository.findAllByOrderByCreatedAtDesc().stream()
             .map(this::toAccountResponse)
             .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public StatsResponse getStats() {
+        long accountCount = accountRepository.count();
+        long totalBalance = accountRepository.sumAllBalances();
+        long recentTxCount = transactionRepository.countByCreatedAtAfter(Instant.now().minusSeconds(300));
+        int activeConnections = activityFeedService.getActiveConnectionCount();
+        return new StatsResponse(accountCount, totalBalance, recentTxCount, activeConnections);
     }
 
     @Transactional(readOnly = true)

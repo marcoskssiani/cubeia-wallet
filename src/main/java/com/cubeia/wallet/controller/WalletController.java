@@ -3,6 +3,7 @@ package com.cubeia.wallet.controller;
 import com.cubeia.wallet.dto.AccountResponse;
 import com.cubeia.wallet.dto.BalanceResponse;
 import com.cubeia.wallet.dto.CreateAccountRequest;
+import com.cubeia.wallet.dto.StatsResponse;
 import com.cubeia.wallet.dto.TransactionListResponse;
 import com.cubeia.wallet.dto.TransactionResponse;
 import com.cubeia.wallet.dto.TransferRequest;
