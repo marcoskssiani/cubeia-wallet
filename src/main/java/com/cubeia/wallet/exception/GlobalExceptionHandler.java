@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
@@ -22,6 +23,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handle(AccountNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(ErrorResponse.of("ACCOUNT_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<ErrorResponse> handle(InsufficientFundsException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(ErrorResponse.of(
+                "INSUFFICIENT_FUNDS",
+                ex.getMessage(),
+                Map.of(
+                    "currentBalance", ex.getCurrentBalance(),
+                    "requestedDebit", ex.getRequestedDebit()
+                )
+            ));
     }
 
     @ExceptionHandler(DuplicateAccountException.class)
